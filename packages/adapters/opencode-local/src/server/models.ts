@@ -125,7 +125,8 @@ export async function discoverOpenCodeModels(input: {
       // image). Fall back to process.env.HOME.
     }
   }
-  const runtimeEnv = normalizeEnv(ensurePathInEnv({ ...process.env, ...env, ...(resolvedHome ? { HOME: resolvedHome } : {}) }));
+  // Prevent OpenCode from writing an opencode.json into the working directory.
+  const runtimeEnv = normalizeEnv(ensurePathInEnv({ ...process.env, ...env, ...(resolvedHome ? { HOME: resolvedHome } : {}), OPENCODE_DISABLE_PROJECT_CONFIG: "true" }));
 
   console.log("[opencode-local] discoverOpenCodeModels: command=%s, cwd=%s, HOME=%s, PATH=%s", command, cwd, runtimeEnv.HOME, runtimeEnv.PATH?.slice(0, 100));
 
