@@ -34,6 +34,7 @@ import {
 } from "@paperclipai/adapter-codex-local";
 import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
 import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
+import { DEFAULT_OPENCODE_LOCAL_MODEL, isValidOpenCodeModelId } from "@paperclipai/adapter-opencode-local";
 
 function createValuesForAdapterType(
   adapterType: CreateConfigValues["adapterType"],
@@ -49,7 +50,7 @@ function createValuesForAdapterType(
   } else if (adapterType === "cursor") {
     nextValues.model = DEFAULT_CURSOR_LOCAL_MODEL;
   } else if (adapterType === "opencode_local") {
-    nextValues.model = "";
+    nextValues.model = DEFAULT_OPENCODE_LOCAL_MODEL;
   }
   return nextValues;
 }
@@ -86,25 +87,6 @@ export function NewAgent() {
     enabled: !!selectedCompanyId,
   });
 
-  const {
-    data: adapterModels,
-    error: adapterModelsError,
-    isLoading: adapterModelsLoading,
-    isFetching: adapterModelsFetching,
-  } = useQuery({
-    queryKey: selectedCompanyId
-      ? queryKeys.agents.adapterModels(selectedCompanyId, configValues.adapterType)
-      : ["agents", "none", "adapter-models", configValues.adapterType],
-    queryFn: () => {
-      const adapterConfig: Record<string, unknown> = {};
-      if (configValues.cwd) adapterConfig.cwd = configValues.cwd;
-      if (configValues.envBindings && Object.keys(configValues.envBindings).length > 0) {
-        adapterConfig.env = configValues.envBindings;
-      }
-      return agentsApi.adapterModels(selectedCompanyId!, configValues.adapterType, adapterConfig);
-    },
-    enabled: Boolean(selectedCompanyId),
-  });
 
   const { data: companySkills } = useQuery({
     queryKey: queryKeys.companySkills.list(selectedCompanyId ?? ""),
@@ -161,30 +143,8 @@ export function NewAgent() {
     if (!selectedCompanyId || !name.trim()) return;
     setFormError(null);
     if (configValues.adapterType === "opencode_local") {
-      const selectedModel = configValues.model.trim();
-      if (!selectedModel) {
+      if (!isValidOpenCodeModelId(configValues.model)) {
         setFormError("OpenCode requires an explicit model in provider/model format.");
-        return;
-      }
-      if (adapterModelsError) {
-        setFormError(
-          adapterModelsError instanceof Error
-            ? adapterModelsError.message
-            : "Failed to load OpenCode models.",
-        );
-        return;
-      }
-      if (adapterModelsLoading || adapterModelsFetching) {
-        setFormError("OpenCode models are still loading. Please wait and try again.");
-        return;
-      }
-      const discovered = adapterModels ?? [];
-      if (!discovered.some((entry) => entry.id === selectedModel)) {
-        setFormError(
-          discovered.length === 0
-            ? "No OpenCode models discovered. Run `opencode models` and authenticate providers."
-            : `Configured OpenCode model is unavailable: ${selectedModel}`,
-        );
         return;
       }
     }
@@ -302,7 +262,6 @@ export function NewAgent() {
           mode="create"
           values={configValues}
           onChange={(patch) => setConfigValues((prev) => ({ ...prev, ...patch }))}
-          adapterModels={adapterModels}
           onTestActionChange={handleTestAgentActionChange}
           onTestActionStateChange={handleTestAgentStateChange}
           onTestFeedbackChange={handleTestAgentFeedbackChange}

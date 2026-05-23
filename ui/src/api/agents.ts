@@ -69,6 +69,15 @@ export interface AgentPermissionUpdate {
   canAssignTasks: boolean;
 }
 
+export interface AgentWakeRequest {
+  source?: "timer" | "assignment" | "on_demand" | "automation";
+  triggerDetail?: "manual" | "ping" | "callback" | "system";
+  reason?: string | null;
+  payload?: Record<string, unknown> | null;
+  idempotencyKey?: string | null;
+  forceFreshSession?: boolean;
+}
+
 function withCompanyScope(path: string, companyId?: string) {
   if (!companyId) return path;
   const separator = path.includes("?") ? "&" : "?";
@@ -171,21 +180,19 @@ export const agentsApi = {
     api.get<AgentTaskSession[]>(agentPath(id, companyId, "/task-sessions")),
   resetSession: (id: string, taskKey?: string | null, companyId?: string) =>
     api.post<void>(agentPath(id, companyId, "/runtime-state/reset-session"), { taskKey: taskKey ?? null }),
-<<<<<<< HEAD
   adapterModels: (
     companyId: string,
     type: string,
-    adapterConfig?: Record<string, unknown>,
-  ) =>
-    api.post<AdapterModel[]>(
-      `/companies/${encodeURIComponent(companyId)}/adapters/${encodeURIComponent(type)}/models`,
-      { adapterConfig: adapterConfig ?? {} },
-=======
-  adapterModels: (companyId: string, type: string, options?: { refresh?: boolean }) =>
-    api.get<AdapterModel[]>(
-      `/companies/${encodeURIComponent(companyId)}/adapters/${encodeURIComponent(type)}/models${options?.refresh ? "?refresh=1" : ""}`,
->>>>>>> upstream-sync
-    ),
+    options?: { refresh?: boolean; environmentId?: string | null },
+  ) => {
+    const params = new URLSearchParams();
+    if (options?.refresh) params.set("refresh", "1");
+    if (options?.environmentId) params.set("environmentId", options.environmentId);
+    const query = params.size > 0 ? `?${params.toString()}` : "";
+    return api.get<AdapterModel[]>(
+      `/companies/${encodeURIComponent(companyId)}/adapters/${encodeURIComponent(type)}/models${query}`,
+    );
+  },
   detectModel: (companyId: string, type: string) =>
     api.get<DetectedAdapterModel | null>(
       `/companies/${encodeURIComponent(companyId)}/adapters/${encodeURIComponent(type)}/detect-model`,
@@ -206,16 +213,11 @@ export const agentsApi = {
       `/companies/${companyId}/adapters/${type}/test-environment`,
       data,
     ),
-  invoke: (id: string, companyId?: string) => api.post<HeartbeatRun>(agentPath(id, companyId, "/heartbeat/invoke"), {}),
+  invoke: (id: string, companyId?: string, data: AgentWakeRequest = {}) =>
+    api.post<HeartbeatRun>(agentPath(id, companyId, "/heartbeat/invoke"), data),
   wakeup: (
     id: string,
-    data: {
-      source?: "timer" | "assignment" | "on_demand" | "automation";
-      triggerDetail?: "manual" | "ping" | "callback" | "system";
-      reason?: string | null;
-      payload?: Record<string, unknown> | null;
-      idempotencyKey?: string | null;
-    },
+    data: AgentWakeRequest,
     companyId?: string,
   ) => api.post<AgentWakeupResponse>(agentPath(id, companyId, "/wakeup"), data),
   loginWithClaude: (id: string, companyId?: string) =>
