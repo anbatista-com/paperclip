@@ -68,6 +68,7 @@ RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/cod
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/
 COPY scripts/docker-onboard-from-env.sh /usr/local/bin/
+COPY scripts/onboard-bootstrap-invite.mts /app/server/_onboard-bootstrap-invite.mts
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/docker-onboard-from-env.sh
 
 ENV NODE_ENV=production \
@@ -84,6 +85,8 @@ ENV NODE_ENV=production \
   PAPERCLIP_DEPLOYMENT_EXPOSURE=private \
   OPENCODE_CONFIG=/paperclip/.config/opencode/opencode.json \
   OPENCODE_ALLOW_ALL_MODELS=true
+
+RUN curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
 
 VOLUME ["/paperclip"]
 EXPOSE 3100

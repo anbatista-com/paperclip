@@ -301,11 +301,11 @@ export interface ProviderQuotaResult {
   windows: QuotaWindow[];
 }
 
-<<<<<<< HEAD
 export interface ListModelsContext {
   cwd?: string;
   env?: Record<string, string>;
-=======
+}
+
 // ---------------------------------------------------------------------------
 // Adapter config schema — declarative UI config for external adapters
 // ---------------------------------------------------------------------------
@@ -332,7 +332,6 @@ export interface ConfigFieldSchema {
 
 export interface AdapterConfigSchema {
   fields: ConfigFieldSchema[];
->>>>>>> upstream-sync
 }
 
 export interface AdapterRuntimeCommandSpec {
@@ -362,10 +361,7 @@ export interface ServerAdapterModule {
   sessionManagement?: import("./session-compaction.js").AdapterSessionManagement;
   supportsLocalAgentJwt?: boolean;
   models?: AdapterModel[];
-<<<<<<< HEAD
   listModels?: (ctx?: ListModelsContext) => Promise<AdapterModel[]>;
-=======
-  listModels?: () => Promise<AdapterModel[]>;
   modelProfiles?: AdapterModelProfileDefinition[];
   listModelProfiles?: () => Promise<AdapterModelProfileDefinition[]>;
   /**
@@ -375,7 +371,6 @@ export interface ServerAdapterModule {
    * or a Paperclip code update.
    */
   refreshModels?: () => Promise<AdapterModel[]>;
->>>>>>> upstream-sync
   agentConfigurationDoc?: string;
   /**
    * Optional lifecycle hook when an agent is approved/hired (join-request or hire_agent approval).

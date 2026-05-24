@@ -1341,27 +1341,29 @@ export function agentRoutes(
     }
   });
 
+  router.get("/companies/:companyId/adapters/:type/models", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const type = assertKnownAdapterType(req.params.type as string);
+    const environmentId = asNonEmptyString(req.query.environmentId);
+    const environment = environmentId ? await environmentsSvc.getById(environmentId) : null;
+    if (environmentId && (!environment || environment.companyId !== companyId)) {
+      res.status(404).json({ error: "Environment not found" });
+      return;
+    }
+    if (type === "opencode_local" && environment && environment.driver !== "local") {
+      const adapter = requireServerAdapter(type);
+      res.json(adapter.models ?? []);
+      return;
+    }
+    const models = await listAdapterModels(type);
+    res.json(models);
+  });
+
   router.post("/companies/:companyId/adapters/:type/models", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
-<<<<<<< HEAD
-    const type = req.params.type as string;
-
-    const adapterConfig = (req.body?.adapterConfig ?? {}) as Record<string, unknown>;
-    const cwd = typeof adapterConfig.cwd === "string" ? adapterConfig.cwd : undefined;
-    const env = typeof adapterConfig.env === "object" && adapterConfig.env !== null
-      ? adapterConfig.env as Record<string, string>
-      : undefined;
-
-    console.log("[agents] POST /adapters/%s/models: cwd=%s, env keys=%s", type, cwd, env ? Object.keys(env).join(",") : "none");
-    const models = await listAdapterModels(type, { cwd, env });
-    console.log("[agents] POST /adapters/%s/models: returning %d models", type, models.length);
-=======
     const type = assertKnownAdapterType(req.params.type as string);
-<<<<<<< HEAD
-    const models = await listAdapterModels(type);
->>>>>>> upstream-sync
-=======
     const refresh = typeof req.query.refresh === "string"
       ? ["1", "true", "yes"].includes(req.query.refresh.toLowerCase())
       : false;
@@ -1379,7 +1381,6 @@ export function agentRoutes(
     const models = refresh
       ? await refreshAdapterModels(type)
       : await listAdapterModels(type);
->>>>>>> upstream-sync
     res.json(models);
   });
 

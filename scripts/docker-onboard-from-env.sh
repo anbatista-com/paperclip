@@ -58,6 +58,13 @@ startup_cmd() {
   exec /usr/local/bin/docker-entrypoint.sh "$@"
 }
 
+create_bootstrap_invite_via_db() {
+  DATABASE_URL="${DATABASE_URL}" \
+    node --import ./server/node_modules/tsx/dist/loader.mjs \
+    ./server/_onboard-bootstrap-invite.mts 2>&1
+  return $?
+}
+
 do_authenticated_bootstrap() {
   if [ -z "$ONBOARD_ADMIN_EMAIL" ] || [ -z "$ONBOARD_ADMIN_PASSWORD" ]; then
     log "ERROR: PAPERCLIP_ONBOARD_ADMIN_EMAIL and PAPERCLIP_ONBOARD_ADMIN_PASSWORD are required in authenticated mode"
@@ -65,7 +72,34 @@ do_authenticated_bootstrap() {
   fi
 
   ADMIN_NAME="${ONBOARD_ADMIN_NAME:-Admin}"
+  INVITE_TOKEN=""
 
+  HEALTH_JSON=$(curl -sS "$BASE_URL/api/health" 2>/dev/null || echo '{}')
+  log "Health: $(echo "$HEALTH_JSON" | jq -c '{bootstrapStatus,deploymentMode,authReady}' 2>/dev/null || echo "$HEALTH_JSON")"
+
+  if echo "$HEALTH_JSON" | grep -q '"bootstrapStatus":"ready"'; then
+    log "Instance already bootstrapped"
+  else
+    log "Creating bootstrap invite via database..."
+    set +e
+    INVITE_OUTPUT=$(create_bootstrap_invite_via_db 2>&1)
+    INVITE_RC=$?
+    set -e
+    if [ "$INVITE_RC" -ne 0 ]; then
+      log "ERROR: Bootstrap invite script exited with code $INVITE_RC"
+      log "Output: $INVITE_OUTPUT"
+      return 1
+    fi
+    INVITE_TOKEN=$(echo "$INVITE_OUTPUT" | grep '^pcp_bootstrap_' | tail -n1)
+    if [ -z "$INVITE_TOKEN" ]; then
+      log "ERROR: Bootstrap invite script did not produce a token"
+      log "Output: $INVITE_OUTPUT"
+      return 1
+    fi
+    log "Bootstrap invite created: $(echo "$INVITE_TOKEN" | cut -c1-30)..."
+  fi
+
+  log "Signing up admin: $ONBOARD_ADMIN_EMAIL"
   SIGNUP_BODY=$(printf '{"name":"%s","email":"%s","password":"%s"}' \
     "$ADMIN_NAME" "$ONBOARD_ADMIN_EMAIL" "$ONBOARD_ADMIN_PASSWORD")
 
@@ -79,6 +113,7 @@ do_authenticated_bootstrap() {
   if echo "$SIGNUP_STATUS" | grep -qE '^2'; then
     log "Admin user created: $ONBOARD_ADMIN_EMAIL"
   else
+    log "Sign-up returned HTTP $SIGNUP_STATUS, trying sign-in..."
     SIGNIN_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" \
       -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
       -H "Content-Type: application/json" \
@@ -88,44 +123,33 @@ do_authenticated_bootstrap() {
     if echo "$SIGNIN_STATUS" | grep -qE '^2'; then
       log "Signed in existing admin: $ONBOARD_ADMIN_EMAIL"
     else
-      log "ERROR: Could not sign up or sign in admin user"
+      log "ERROR: Could not sign up (HTTP $SIGNUP_STATUS) or sign in (HTTP $SIGNIN_STATUS)"
       return 1
     fi
   fi
 
   HEALTH_JSON=$(curl -sS "$BASE_URL/api/health" 2>/dev/null || echo '{}')
   if echo "$HEALTH_JSON" | grep -q '"bootstrapStatus":"ready"'; then
-    log "Instance already bootstrapped"
+    log "Instance bootstrapped"
     return 0
   fi
 
-  BOOTSTRAP_OUTPUT=$(timeout 30s npx --yes "paperclipai@latest" auth bootstrap-ceo \
-    --data-dir "${PAPERCLIP_HOME:-/paperclip}" \
-    --base-url "$BASE_URL" 2>&1 || true)
+  if [ -n "$INVITE_TOKEN" ]; then
+    log "Accepting bootstrap invite..."
+    ACCEPT_STATUS=$(curl -sS -o "$TMPResponseBody" -w "%{http_code}" \
+      -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+      -H "Content-Type: application/json" \
+      -H "Origin: $BASE_URL" \
+      -X POST "$BASE_URL/api/invites/$INVITE_TOKEN/accept" \
+      --data '{"requestType":"human"}' 2>/dev/null || true)
 
-  INVITE_URL=$(printf '%s\n' "$BOOTSTRAP_OUTPUT" \
-    | grep -o 'https\?://[^[:space:]]*/invite/pcp_bootstrap_[[:alnum:]]*' \
-    | tail -n 1)
-
-  if [ -z "$INVITE_URL" ]; then
-    log "ERROR: bootstrap-ceo did not produce an invite URL"
-    log "Output: $BOOTSTRAP_OUTPUT"
-    return 1
+    if ! echo "$ACCEPT_STATUS" | grep -qE '^2'; then
+      log "ERROR: Bootstrap invite acceptance returned HTTP $ACCEPT_STATUS"
+      cat "$TMPResponseBody" 2>/dev/null
+      return 1
+    fi
+    log "Bootstrap invite accepted"
   fi
-
-  INVITE_TOKEN="${INVITE_URL##*/}"
-  ACCEPT_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" \
-    -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
-    -H "Content-Type: application/json" \
-    -H "Origin: $BASE_URL" \
-    -X POST "$BASE_URL/api/invites/$INVITE_TOKEN/accept" \
-    --data '{"requestType":"human"}' 2>/dev/null || true)
-
-  if ! echo "$ACCEPT_STATUS" | grep -qE '^2'; then
-    log "ERROR: Bootstrap invite acceptance returned HTTP $ACCEPT_STATUS"
-    return 1
-  fi
-  log "Bootstrap invite accepted"
   return 0
 }
 
@@ -139,7 +163,6 @@ api_get() {
 api_post() {
   path="$1"
   body="$2"
-  expect_status="${3:-201}"
   curl -sS \
     -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
     -H "Content-Type: application/json" \
@@ -147,7 +170,7 @@ api_post() {
     -o "$TMPResponseBody" \
     -w "%{http_code}" \
     -X POST "$BASE_URL$path" \
-    --data "$body" 2>/dev/null
+    --data "$body" 2>/dev/null || true
 }
 
 do_onboard() {
@@ -165,7 +188,8 @@ do_onboard() {
   fi
 
   COMPANIES=$(api_get "/api/companies")
-  if [ "${COMPANIES:0:1}" = "[" ] && [ "$COMPANIES" != "[]" ]; then
+  FIRST_CHAR=$(printf '%s' "$COMPANIES" | cut -c1)
+  if [ "$FIRST_CHAR" = "[" ] && [ "$COMPANIES" != "[]" ]; then
     log "Onboarding already done (companies exist), skipping"
     return 0
   fi
@@ -230,7 +254,7 @@ AGENTEOF
 {"title":"$ESCAPED_TITLE","description":"$ESCAPED_DESC","status":"todo","assigneeAgentId":"$AGENT_ID"$([ -n "$PROJECT_ID" ] && printf ',"projectId":"%s"' "$PROJECT_ID" || printf '')$([ -n "$GOAL_ID" ] && printf ',"goalId":"%s"' "$GOAL_ID" || printf '')}
 ISSUEEOF
 )
-  STATUS=$(api_post "/api/companies/$COMPANY_ID/issues" "$ISSUE_BODY" 201)
+  STATUS=$(api_post "/api/companies/$COMPANY_ID/issues" "$ISSUE_BODY")
   if ! echo "$STATUS" | grep -qE '^2'; then
     log "WARNING: Failed to create starter issue (HTTP $STATUS)"
   else
@@ -256,7 +280,7 @@ cleanup_onboard() {
 trap cleanup_onboard EXIT INT TERM
 
 log "Starting server in background for onboarding..."
-"$@" &
+/usr/local/bin/docker-entrypoint.sh "$@" &
 SERVER_PID=$!
 
 log "Waiting for server..."
